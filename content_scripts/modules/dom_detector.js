@@ -193,9 +193,19 @@ class DOMDetector {
             let optionText = null;
             let optionValue = null;
             let inputElement = null;
+            let labelElement = null;
 
             // Try to find the associated input element first
             inputElement = optionElement.querySelector('input[type="radio"], input[type="checkbox"]');
+
+            // Find the label that wraps or is associated with the input — clicking the label
+            // is more reliable than clicking the hidden input on React/custom-styled forms
+            if (inputElement) {
+                // Label might be the parent of the input, or a sibling label, or the option container itself
+                labelElement = inputElement.closest('label') ||
+                               optionElement.querySelector('label') ||
+                               (optionElement.tagName === 'LABEL' ? optionElement : null);
+            }
 
             // NEW: Prioritize code element extraction within the option
             const codeElementsInOption = optionElement.querySelectorAll('pre, code, .monaco-editor .view-line > span');
@@ -206,27 +216,29 @@ class DOMDetector {
                 }
             });
 
-            if (collectedOptionCodeLines.length > 0 && collectedOptionCodeLines.join('\n').trim().length > 5) { // Require a meaningful code snippet
+            if (collectedOptionCodeLines.length > 0 && collectedOptionCodeLines.join('\n').trim().length > 5) {
                 optionText = collectedOptionCodeLines.join('\n').trim();
                 console.log("DOMDetector: Code snippet extracted from option element.");
             } else {
-                // Try to find the option text within the option element
-                const textElement = optionElement.querySelector('.rc-Option .rc-CML p') ||
-                                    optionElement.querySelector('.rc-Option__text') ||
-                                    optionElement.querySelector('span:not([data-testid="visually-hidden"])') || // Avoid hidden screen reader text
-                                    optionElement.querySelector('.cml-viewer p') ||
-                                    optionElement.querySelector('p') ||
-                                    // Fallback: if no specific text element, take text from common immediate children
-                                    optionElement.querySelector('.rc-CML') ||
-                                    optionElement; // As a last resort, take text content of the option element itself
+                // Try to find the option text — CDS-specific selectors first (2024-2025 Coursera)
+                const textElement =
+                    optionElement.querySelector('.cds-checkboxAndRadio-labelContent .rc-CML p') ||
+                    optionElement.querySelector('.cds-checkboxAndRadio-labelContent') ||
+                    optionElement.querySelector('.cds-checkboxAndRadio-labelText .rc-CML p') ||
+                    optionElement.querySelector('.rc-Option .rc-CML p') ||
+                    optionElement.querySelector('.rc-Option__text') ||
+                    optionElement.querySelector('span:not([data-testid="visually-hidden"])') ||
+                    optionElement.querySelector('.cml-viewer p') ||
+                    optionElement.querySelector('p') ||
+                    optionElement.querySelector('.rc-CML') ||
+                    optionElement;
 
                 if (textElement && textElement.textContent.trim()) {
                     optionText = textElement.textContent.trim();
-                    // Clean up leading option letters if they are redundant (e.g., "A. Option Text" -> "Option Text")
-                    optionText = optionText.replace(/^[A-Z]\.\s*/, '').trim();
+                    // Strip leading option letters (A. / A) / 1. / 1) formats)
+                    optionText = optionText.replace(/^[A-Za-z0-9]+[.)]\s*/, '').trim();
                 } else {
-                    // Fallback to direct text content of the option element, cleaning up any leading numbers/letters
-                    optionText = optionElement.textContent.trim().replace(/^[a-zA-Z]\.\s*|^[0-9]\.\s*/, '').trim();
+                    optionText = optionElement.textContent.trim().replace(/^[A-Za-z0-9]+[.)]\s*/, '').trim();
                 }
             }
 
@@ -238,13 +250,13 @@ class DOMDetector {
             if (inputElement && inputElement.value !== undefined && inputElement.value !== null && inputElement.value !== '') {
                 optionValue = inputElement.value;
             } else {
-                // Generate a stable unique value if not present from input (important for internal mapping)
                 optionValue = optionText ? optionText.replace(/[^a-zA-Z0-9]/g, '_').toLowerCase().substring(0, 50) : `option_${index}`;
-                console.warn(`DOMDetector: inputElement.value not found or empty for option, generated fallback value: ${optionValue}. Option element:`, optionElement);
+                console.warn(`DOMDetector: inputElement.value not found or empty for option, generated fallback value: ${optionValue}.`);
             }
 
             if (optionText && inputElement) {
-                options.push({ text: optionText, value: optionValue, element: inputElement });
+                // Store both the input element AND the label element for more reliable clicking
+                options.push({ text: optionText, value: optionValue, element: inputElement, labelElement: labelElement });
             } else {
                 console.warn(`DOMDetector: Skipping malformed option. No text or input element found for:`, optionElement);
             }

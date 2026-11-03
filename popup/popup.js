@@ -17,13 +17,14 @@ document.addEventListener('DOMContentLoaded', initializePopup);
  * Initializes all components and event listeners when the popup DOM is loaded.
  */
 async function initializePopup() {
-    const apiKeyInputEl = document.getElementById('geminiApiKey');
+    const apiKeyInputEl = document.getElementById('nvidiaApiKey');
     const saveApiKeyBtnEl = document.getElementById('saveApiKeyBtn');
     const apiKeyStatusEl = document.getElementById('apiKeyStatus');
     const triggerSolverBtnEl = document.getElementById('triggerSolverBtn');
     const solverStatusEl = document.getElementById('solverStatus');
 
     const autoSolveToggle = document.getElementById('autoSolveToggle');
+    const autoSubmitToggle = document.getElementById('autoSubmitToggle');
     const explanationToggle = document.getElementById('explanationToggle');
     const confidenceThreshold = document.getElementById('confidenceThreshold');
     const confidenceValueSpan = document.getElementById('confidenceValue');
@@ -34,12 +35,13 @@ async function initializePopup() {
 
     // Load and set initial settings
     await loadSettings({
-        autoSolveToggle, explanationToggle, confidenceThreshold,
+        autoSolveToggle, autoSubmitToggle, explanationToggle, confidenceThreshold,
         confidenceValueSpan, delayBeforeSolveInput
     });
 
     // Event Listeners for Settings
     autoSolveToggle.addEventListener('change', () => saveSetting(CONSTANTS.STORAGE_KEYS.SETTINGS.AUTO_SOLVE, autoSolveToggle.checked));
+    autoSubmitToggle.addEventListener('change', () => saveSetting(CONSTANTS.STORAGE_KEYS.SETTINGS.AUTO_SUBMIT, autoSubmitToggle.checked));
     explanationToggle.addEventListener('change', () => saveSetting(CONSTANTS.STORAGE_KEYS.SETTINGS.EXPLANATIONS, explanationToggle.checked));
     
     confidenceThreshold.addEventListener('input', () => {
@@ -114,15 +116,21 @@ async function initializePopup() {
  */
 async function loadSettings(elements) {
     try {
-        const settings = await StorageManager.get(CONSTANTS.STORAGE_KEYS.SETTINGS_GROUP);
-        elements.autoSolveToggle.checked = settings[CONSTANTS.STORAGE_KEYS.SETTINGS.AUTO_SOLVE] ?? true; // Default to true
-        elements.explanationToggle.checked = settings[CONSTANTS.STORAGE_KEYS.SETTINGS.EXPLANATIONS] ?? false; // Default to false
+        const settings = (await StorageManager.get(CONSTANTS.STORAGE_KEYS.SETTINGS_GROUP)) || {};
+        elements.autoSolveToggle.checked = settings[CONSTANTS.STORAGE_KEYS.SETTINGS.AUTO_SOLVE] ?? true;
+        elements.autoSubmitToggle.checked = settings[CONSTANTS.STORAGE_KEYS.SETTINGS.AUTO_SUBMIT] ?? false;
+        elements.explanationToggle.checked = settings[CONSTANTS.STORAGE_KEYS.SETTINGS.EXPLANATIONS] ?? false;
         elements.confidenceThreshold.value = settings[CONSTANTS.STORAGE_KEYS.SETTINGS.MIN_CONFIDENCE] ?? 70;
         elements.confidenceValueSpan.textContent = `${elements.confidenceThreshold.value}%`;
         elements.delayBeforeSolveInput.value = settings[CONSTANTS.STORAGE_KEYS.SETTINGS.DELAY_SOLVE_MS] ?? 500;
     } catch (error) {
         ErrorHandler.logError('Failed to load settings', error);
-        // Fallback to default UI states if loading fails
+        elements.autoSolveToggle.checked = true;
+        elements.autoSubmitToggle.checked = false;
+        elements.explanationToggle.checked = false;
+        elements.confidenceThreshold.value = 70;
+        elements.confidenceValueSpan.textContent = '70%';
+        elements.delayBeforeSolveInput.value = 500;
     }
 }
 

@@ -21,6 +21,7 @@ class ApiKeyInput {
         this.saveApiKeyBtnEl = saveApiKeyBtnEl;
         this.apiKeyStatusEl = apiKeyStatusEl;
         this.triggerSolverBtnEl = triggerSolverBtnEl;
+        this.storageKey = CONSTANTS.STORAGE_KEYS.NVIDIA_API_KEY;
         this.init();
     }
 
@@ -37,7 +38,7 @@ class ApiKeyInput {
      */
     async loadApiKey() {
         try {
-            const apiKey = await StorageManager.get(CONSTANTS.STORAGE_KEYS.GEMINI_API_KEY);
+            const apiKey = await StorageManager.get(CONSTANTS.STORAGE_KEYS.NVIDIA_API_KEY);
             if (apiKey) {
                 this.apiKeyInputEl.value = apiKey;
                 this.displayStatus('API key loaded.', 'success');
@@ -65,14 +66,14 @@ class ApiKeyInput {
             return;
         }
 
-        if (!this.isValidGeminiApiKey(apiKey)) { // Basic validation
-            this.displayStatus('Invalid API Key format. Must start with "AIza".', 'error');
+        if (!this.isValidNvidiaApiKey(apiKey)) { // Basic validation
+            this.displayStatus('Invalid API Key format. Must start with "nvapi-".', 'error');
             this.triggerSolverBtnEl.disabled = true;
             return;
         }
 
         try {
-            await StorageManager.set(CONSTANTS.STORAGE_KEYS.GEMINI_API_KEY, apiKey);
+            await StorageManager.set(CONSTANTS.STORAGE_KEYS.NVIDIA_API_KEY, apiKey);
             this.displayStatus('API Key saved successfully!', 'success');
             this.triggerSolverBtnEl.disabled = false;
         } catch (error) {
@@ -83,14 +84,13 @@ class ApiKeyInput {
     }
 
     /**
-     * Performs a basic format validation for a Gemini API key.
-     * Note: Full validation requires an API call, which can be added later if needed.
+     * Performs a basic format validation for a NVIDIA API key.
      * @param {string} key - The API key to validate.
      * @returns {boolean} - True if the key format is valid, false otherwise.
      */
-    isValidGeminiApiKey(key) {
-        // Basic check: Gemini API keys typically start with 'AIza'
-        return typeof key === 'string' && key.startsWith('AIza') && key.length > 30; // A reasonable minimum length
+    isValidNvidiaApiKey(key) {
+        // Basic check: NVIDIA API keys start with 'nvapi-'
+        return typeof key === 'string' && key.startsWith('nvapi-') && key.length > 30; // A reasonable minimum length
     }
 
     /**

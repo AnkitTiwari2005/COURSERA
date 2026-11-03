@@ -8,6 +8,60 @@
 
 class AnswerRenderer {
     /**
+     * Normalizes text for comparison: lowercase, trim, collapse whitespace.
+     * @param {string} text
+     * @returns {string}
+     */
+    static _normalize(text) {
+        return (text || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    }
+
+    /**
+     * Checks if a given answer text matches an option text.
+     * Priority: exact match → normalized match.
+     * Does NOT use includes() to avoid false positive partial matches.
+     * @param {string} optionText
+     * @param {string} answerText
+     * @returns {boolean}
+     */
+    static _isMatch(optionText, answerText) {
+        if (optionText === answerText) return true; // Exact
+        const normOpt = AnswerRenderer._normalize(optionText);
+        const normAns = AnswerRenderer._normalize(answerText);
+        return normOpt === normAns;
+    }
+
+    /**
+     * Simulates a React-compatible click on an input element.
+     * React overrides the native input setter, so we must use the native prototype
+     * to trigger a real change that React will detect.
+     * @param {HTMLInputElement} inputEl
+     */
+    static _triggerReactChange(inputEl) {
+        try {
+            // Get the native input value setter to bypass React's synthetic wrapper
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 'checked'
+            );
+            if (nativeInputValueSetter && nativeInputValueSetter.set) {
+                nativeInputValueSetter.set.call(inputEl, true);
+            } else {
+                inputEl.checked = true;
+            }
+        } catch (e) {
+            // Fallback: direct assignment
+            inputEl.checked = true;
+        }
+
+        // Fire both native and synthetic events for maximum React compatibility
+        inputEl.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        inputEl.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        inputEl.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    /**
      * Renders the provided answers by either auto-selecting or highlighting.
      * @param {object} questionData - The question object obtained from DOMDetector.
      * @param {string[]} answers - An array of strings representing the correct answer texts.
@@ -19,61 +73,78 @@ class AnswerRenderer {
             return;
         }
 
-        // --- START DEBUGGING LOGS ---
-        console.log('AnswerRenderer: questionData.options:', questionData.options);
-        console.log('AnswerRenderer: answers from Gemini:', answers);
-        // --- END DEBUGGING LOGS ---
-
-        const selectedElements = new Set(); // To prevent duplicate highlighting/selection
+        const selectedElements = new Set();
+        let matchCount = 0;
 
         questionData.options.forEach(option => {
-            const optionTextLower = option.text.toLowerCase();
-            const isCorrectAnswer = answers.some(ans => optionTextLower.includes(ans.toLowerCase())); // Case-insensitive, partial match
+            const isCorrectAnswer = answers.some(ans => AnswerRenderer._isMatch(option.text, ans));
 
-            // Remove any previous highlight/selection classes
-            if (option.element.closest) { // Check if closest exists (for non-input elements if any)
-                 option.element.classList.remove('gs-selected-answer', 'gs-highlighted-answer');
-                 const labelParent = option.element.closest('.rc-RadioChoice__label, .rc-CheckboxChoice__label');
-                 if (labelParent) {
-                     labelParent.classList.remove('gs-selected-answer', 'gs-highlighted-answer');
-                 }
+            // Clean up any previous highlight/selection classes
+            if (option.element && option.element.closest) {
+                option.element.classList.remove('gs-selected-answer', 'gs-highlighted-answer');
+                const labelParent = option.element.closest(
+                    '.rc-RadioChoice__label, .rc-CheckboxChoice__label, label'
+                );
+                if (labelParent) {
+                    labelParent.classList.remove('gs-selected-answer', 'gs-highlighted-answer');
+                }
             }
 
-
-            if (isCorrectAnswer) {
-                // To avoid selecting/highlighting the same element multiple times if logic is complex
-                if (selectedElements.has(option.element)) {
+            if (isCorrectAnswer && !selectedElements.has(option.element)) {
+                if (!option.element) {
+                    console.warn('AnswerRenderer: option.element is null/undefined for option:', option.text);
                     return;
                 }
 
                 if (autoSelect) {
-                    if (option.element.type === 'radio' || option.element.type === 'checkbox') {
-                        option.element.checked = true;
-                        // Trigger change event to ensure Coursera's JS registers the selection
-                        option.element.dispatchEvent(new Event('change', { bubbles: true }));
-                        option.element.dispatchEvent(new Event('click', { bubbles: true })); // Some frameworks listen to click
-                    }
-                    if (option.element.closest) {
-                        const labelParent = option.element.closest('.rc-RadioChoice__label, .rc-CheckboxChoice__label');
-                        if (labelParent) {
-                            labelParent.classList.add('gs-selected-answer');
-                        }
+                    // Strategy 1: Click the label directly (most reliable for Coursera's hidden inputs)
+                    const labelEl = option.labelElement ||
+                        option.element.closest('label') ||
+                        option.element.closest('.rc-RadioChoice__label, .rc-CheckboxChoice__label');
+
+                    if (labelEl) {
+                        console.log('AnswerRenderer: Clicking label for option:', option.text);
+                        labelEl.click();
+                        labelEl.classList.add('gs-selected-answer');
+                        matchCount++;
+                    } else if (option.element.type === 'radio' || option.element.type === 'checkbox') {
+                        // Strategy 2: React-compatible native setter + events (fallback)
+                        console.log('AnswerRenderer: Using native setter for option:', option.text);
+                        AnswerRenderer._triggerReactChange(option.element);
+                        // Also add visual highlight class to the input's parent
+                        const closestLabel = option.element.closest('label') ||
+                            option.element.parentElement;
+                        if (closestLabel) closestLabel.classList.add('gs-selected-answer');
+                        matchCount++;
                     }
                 } else {
-                    if (option.element.closest) {
-                        const labelParent = option.element.closest('.rc-RadioChoice__label, .rc-CheckboxChoice__label');
-                        if (labelParent) {
-                            labelParent.classList.add('gs-highlighted-answer');
-                        } else {
-                            // Fallback if not a standard Coursera label structure
-                            option.element.classList.add('gs-highlighted-answer');
-                        }
+                    // Highlight-only mode (autoSolve off)
+                    const labelParent = option.element.closest(
+                        '.rc-RadioChoice__label, .rc-CheckboxChoice__label, label'
+                    );
+                    if (labelParent) {
+                        labelParent.classList.add('gs-highlighted-answer');
+                    } else {
+                        option.element.classList.add('gs-highlighted-answer');
                     }
+                    matchCount++;
                 }
                 selectedElements.add(option.element);
             }
         });
+
+        if (matchCount === 0) {
+            console.warn('AnswerRenderer: No options were matched/selected.',
+                '\n  Answers from AI:', answers,
+                '\n  Available options:', questionData.options.map(o => o.text));
+        } else {
+            console.log(`AnswerRenderer: Successfully matched and acted on ${matchCount}/${answers.length} answer(s).`);
+        }
+
+        // Return matchCount so callers can detect partial matches
+        return matchCount;
     }
 }
 
 export { AnswerRenderer };
+

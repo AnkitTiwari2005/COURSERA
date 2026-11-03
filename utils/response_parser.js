@@ -2,7 +2,7 @@
 
 /**
  * @module ResponseParser
- * @description Parses the raw JSON response from the Gemini API to extract
+ * @description Parses the raw JSON response from the NVIDIA API to extract
  * the identified correct answers and any requested explanations.
  * Designed to be flexible to various output formats.
  */
@@ -11,8 +11,38 @@ import { ErrorHandler } from './error_handler.js';
 
 class ResponseParser {
     /**
-     * Parses the Gemini API response to extract quiz answers and explanations.
-     * @param {object} geminiResponse - The raw JSON response object from the Gemini API.
+     * Helper to safely extract and parse JSON from model output text.
+     * @param {string} text 
+     * @returns {object}
+     */
+    static extractJson(text) {
+        if (!text) return null;
+        let cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+        try {
+            return JSON.parse(cleaned);
+        } catch (e) {
+            const match = text.match(/\{[\s\S]*\}/);
+            if (match) {
+                let candidate = match[0];
+                try {
+                    return JSON.parse(candidate);
+                } catch (e2) {
+                    try {
+                        candidate = candidate.replace(/,\s*([\}\]])/g, '$1');
+                        return JSON.parse(candidate);
+                    } catch (e3) {
+                        ErrorHandler.logError('ResponseParser: Failed to parse repaired JSON.', { candidate, error: e3 });
+                        throw e2;
+                    }
+                }
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Parses the NVIDIA API response to extract quiz answers and explanations.
+     * @param {object} nvidiaResponse - The raw JSON response object from the NVIDIA API.
      * @param {Array<object>} options - The original array of option objects from DOMDetector (includes {text, value, element}).
      * @param {'single'|'multiple'} questionType - The type of question.
      * @returns {object} An object containing:
@@ -21,131 +51,160 @@ class ResponseParser {
      * - `confidence`: number (0-100), inferred or directly from model (placeholder).
      * @throws {Error} If no valid answer or response text can be extracted.
      */
-    static parseGeminiQuizResponse(geminiResponse, options, questionType) {
-        if (!geminiResponse || !geminiResponse.candidates || geminiResponse.candidates.length === 0) {
-            ErrorHandler.logError('ResponseParser: Invalid or empty Gemini response received.', geminiResponse);
-            throw new Error('Invalid or empty response from Gemini API.');
+    static parseNvidiaQuizResponse(nvidiaResponse, options, questionType) {
+        if (!nvidiaResponse || !nvidiaResponse.choices || nvidiaResponse.choices.length === 0) {
+            ErrorHandler.logError('ResponseParser: Invalid or empty NVIDIA response received.', nvidiaResponse);
+            throw new Error('Invalid or empty response from NVIDIA API.');
         }
 
-        const candidate = geminiResponse.candidates[0];
-        let responseText = '';
-
-        // Safely extract text from parts
-        if (candidate.content && Array.isArray(candidate.content.parts)) {
-            responseText = candidate.content.parts
-                .filter(part => part.text)
-                .map(part => part.text)
-                .join(' ').trim();
-        }
+        const choice = nvidiaResponse.choices[0];
+        let responseText = choice?.message?.content || choice?.message?.reasoning_content;
 
         if (!responseText) {
-            ErrorHandler.logError('ResponseParser: No text content found in Gemini response candidate.', geminiResponse);
-            throw new Error('No answer text provided by Gemini.');
+            ErrorHandler.logError('ResponseParser: No text content found in NVIDIA response choice.', nvidiaResponse);
+            throw new Error('No answer text provided by NVIDIA API.');
         }
 
-        console.log('ResponseParser: Gemini raw response text:', responseText);
+        console.log('ResponseParser: NVIDIA raw response text:', responseText);
 
-        let extractedExplanation = null;
-        let answerPart = responseText;
-
-        // Attempt to separate answer from explanation based on "Explanation:" keyword
-        const explanationDelimiter = /Explanation:\s*/i; // Case-insensitive
-        const explanationMatch = responseText.match(explanationDelimiter);
-
-        if (explanationMatch) {
-            extractedExplanation = responseText.substring(explanationMatch.index + explanationMatch[0].length).trim();
-            answerPart = responseText.substring(0, explanationMatch.index).trim();
+        let parsedJson = null;
+        try {
+            parsedJson = ResponseParser.extractJson(responseText);
+        } catch (e) {
+            ErrorHandler.logError('ResponseParser: Failed to parse JSON from NVIDIA response.', { responseText, error: e });
+            throw new Error('Failed to parse JSON response from NVIDIA API.');
         }
 
-        // --- Robust Answer Extraction from `answerPart` ---
-        let parsedAnswerLetters = [];
-        // Ensure maxOptionLetter is correctly calculated, handling cases with many options
-        const maxOptionLetter = options.length > 0 ? String.fromCharCode(64 + options.length) : 'A'; 
+        if (!parsedJson || (!parsedJson.answers && !parsedJson.explanation)) {
+            ErrorHandler.logError('ResponseParser: JSON did not contain answers or explanation.', parsedJson);
+            throw new Error('Invalid JSON structure returned by model.');
+        }
 
-
-        if (questionType === 'single') {
-            // Strategy 1: Look for a single letter (A, B, C, D) as the entire answer part
-            if (new RegExp(`^[A-${maxOptionLetter}]$`).test(answerPart)) {
-                parsedAnswerLetters.push(answerPart);
-            } else {
-                // Strategy 2: Look for 'A.', 'B.', 'Option A', 'Answer is B'
-                const singleLetterMatch = answerPart.match(new RegExp(`(?:^|[^A-Z0-9])([A-${maxOptionLetter}])(?:\\.|\\s|$)`, 'i'));
-                if (singleLetterMatch && singleLetterMatch[1]) {
-                    parsedAnswerLetters.push(singleLetterMatch[1].toUpperCase());
+        let finalParsedAnswers = [];
+        if (parsedJson.answers && Array.isArray(parsedJson.answers)) {
+            for (const ans of parsedJson.answers) {
+                // 1st: exact match
+                const exactMatch = options.find(opt => opt.text === ans);
+                if (exactMatch && !finalParsedAnswers.includes(exactMatch.text)) {
+                    finalParsedAnswers.push(exactMatch.text);
+                    continue;
                 }
-            }
-        } else { // 'multiple' choice
-            // Strategy 1: Look for comma-separated letters (e.g., "A, C", "B, D, A")
-            // This regex now correctly captures multiple letters by finding all matches globally
-            const commaSeparatedMatches = answerPart.match(new RegExp(`[A-${maxOptionLetter}]`, 'g'));
-            if (commaSeparatedMatches) {
-                parsedAnswerLetters = commaSeparatedMatches.map(s => s.trim().toUpperCase());
-            } else {
-                // Strategy 2: Look for multiple individual letters (e.g., "A and C", "B. C. D")
-                // This is already covered by the global regex above.
-                // Re-added for clarity in case future modifications separate concerns.
-                const individualLetters = answerPart.match(new RegExp(`[A-${maxOptionLetter}]`, 'g'));
-                if (individualLetters) {
-                    parsedAnswerLetters = individualLetters.map(s => s.toUpperCase());
+                // 2nd: normalized (lowercase + trim + collapse whitespace)
+                const normAns = ans.toLowerCase().replace(/\s+/g, ' ').trim();
+                const normMatch = options.find(opt =>
+                    opt.text.toLowerCase().replace(/\s+/g, ' ').trim() === normAns
+                );
+                if (normMatch && !finalParsedAnswers.includes(normMatch.text)) {
+                    finalParsedAnswers.push(normMatch.text);
+                } else {
+                    console.warn(`ResponseParser: Could not match answer "${ans}" to any option.`);
                 }
             }
         }
 
-        // Filter and map to actual option texts
-        let finalParsedAnswers = []; // Changed to `let` for re-assignment in fallback
-        const seenLetters = new Set(); // To ensure unique answers
-
-        // Validate extracted letters against available options
-        for (const letter of parsedAnswerLetters) {
-            const index = letter.charCodeAt(0) - 65;
-            if (options[index] && !seenLetters.has(letter)) {
-                finalParsedAnswers.push(options[index].text);
-                seenLetters.add(letter);
-            } else if (options[index] && seenLetters.has(letter)) {
-                console.warn(`ResponseParser: Duplicate answer letter '${letter}' detected and ignored.`);
-            } else {
-                console.warn(`ResponseParser: Extracted letter '${letter}' does not correspond to a valid option.`);
-            }
-        }
-        
-        // --- Fallback if no letter-based answers are found, but options are present in response text ---
-        // This is a lower confidence fallback and should ideally not be hit if prompt is followed.
-        if (finalParsedAnswers.length === 0 && options.length > 0) {
-            console.warn("ResponseParser: No letter-based answers found. Attempting to match full option text as fallback.");
-            const responseTextLower = responseText.toLowerCase();
-
-            options.forEach(option => {
-                const optionTextLower = option.text.toLowerCase();
-                // Check if the exact option text (or a very close match) is present in the response
-                // This is a simple `includes` - a more sophisticated approach might use fuzzy matching
-                if (responseTextLower.includes(optionTextLower) && !finalParsedAnswers.includes(option.text)) {
-                    // For single choice, if multiple answers were picked up by text matching, just take the first
-                    // IMPORTANT: This condition only applies to 'single' choice questions.
-                    if (questionType === 'single' && finalParsedAnswers.length > 0) {
-                        return; // Already found a single answer for a single-choice question
-                    }
-                    finalParsedAnswers.push(option.text);
-                }
-            });
-
-            // For single choice, if multiple answers were picked up by text matching, just take the first
-            // This is a redundant check if the above `return` handles it for 'single', but good for robustness.
-            if (questionType === 'single' && finalParsedAnswers.length > 1) {
-                console.warn('ResponseParser: Multiple answers parsed by text match for single choice. Taking the first.');
-                finalParsedAnswers = [finalParsedAnswers[0]];
-            }
+        if (finalParsedAnswers.length === 0 && parsedJson.answers && parsedJson.answers.length > 0) {
+             console.warn("ResponseParser: Could not validate any answers from JSON against options. Falling back to the raw JSON answers.");
+             finalParsedAnswers = parsedJson.answers;
         }
 
-        if (finalParsedAnswers.length === 0) {
-            ErrorHandler.logError('ResponseParser: Failed to extract any valid answer from Gemini response text.', responseText);
-            throw new Error('ResponseParser: Failed to extract any valid answer from Gemini response text.');
+        if (finalParsedAnswers.length === 0 && !parsedJson.explanation) {
+             ErrorHandler.logError('ResponseParser: Failed to extract any valid answer from response text.', responseText);
+             throw new Error('ResponseParser: Failed to extract any valid answer from response text.');
         }
 
         return {
             answers: finalParsedAnswers,
-            explanation: extractedExplanation,
-            confidence: 100 // Placeholder. Gemini API doesn't directly provide confidence score.
+            explanation: parsedJson.explanation || null,
+            confidence: 100 // Placeholder. NVIDIA API doesn't directly provide confidence score.
         };
+    }
+
+    /**
+     * Parses the NVIDIA API response for a batch of quiz questions.
+     * @param {object} nvidiaResponse - The raw JSON response object from the NVIDIA API.
+     * @param {Array<object>} questionsArray - The original array of questionData objects.
+     * @returns {Array<object>} An array of parsed result objects in the same order as questionsArray.
+     */
+    static parseNvidiaBatchQuizResponse(nvidiaResponse, questionsArray) {
+        if (!nvidiaResponse || !nvidiaResponse.choices || nvidiaResponse.choices.length === 0) {
+            ErrorHandler.logError('ResponseParser: Invalid or empty NVIDIA batch response received.', nvidiaResponse);
+            throw new Error('Invalid or empty batch response from NVIDIA API.');
+        }
+
+        const choice = nvidiaResponse.choices[0];
+        let responseText = choice?.message?.content || choice?.message?.reasoning_content;
+
+        if (!responseText) {
+            ErrorHandler.logError('ResponseParser: No text content found in NVIDIA batch response choice.', nvidiaResponse);
+            throw new Error('No answer text provided by NVIDIA API for batch.');
+        }
+
+        console.log('ResponseParser: NVIDIA raw batch response text:', responseText);
+
+        let parsedJson = null;
+        try {
+            parsedJson = ResponseParser.extractJson(responseText);
+        } catch (e) {
+            ErrorHandler.logError('ResponseParser: Failed to parse JSON from NVIDIA batch response.', { responseText, error: e });
+            throw new Error('Failed to parse JSON batch response from NVIDIA API.');
+        }
+
+        const results = [];
+        for (let i = 0; i < questionsArray.length; i++) {
+            const qData = questionsArray[i];
+            const answerData = parsedJson[String(i)];
+
+            if (!answerData) {
+                console.warn(`ResponseParser: No answer data found for question index ${i}`);
+                results.push({
+                    status: 'error',
+                    message: 'No answer found for this question in batch response.'
+                });
+                continue;
+            }
+
+            let finalParsedAnswers = [];
+            if (answerData.answers && Array.isArray(answerData.answers)) {
+                for (const ans of answerData.answers) {
+                    // 1st: exact match
+                    const exactMatch = qData.options.find(opt => opt.text === ans);
+                    if (exactMatch && !finalParsedAnswers.includes(exactMatch.text)) {
+                        finalParsedAnswers.push(exactMatch.text);
+                        continue;
+                    }
+                    // 2nd: normalized (lowercase + trim + collapse whitespace)
+                    const normAns = ans.toLowerCase().replace(/\s+/g, ' ').trim();
+                    const normMatch = qData.options.find(opt =>
+                        opt.text.toLowerCase().replace(/\s+/g, ' ').trim() === normAns
+                    );
+                    if (normMatch && !finalParsedAnswers.includes(normMatch.text)) {
+                        finalParsedAnswers.push(normMatch.text);
+                    } else {
+                        console.warn(`ResponseParser (batch): Could not match answer "${ans}" to any option for question index ${i}.`);
+                    }
+                }
+            }
+
+            if (finalParsedAnswers.length === 0 && answerData.answers && answerData.answers.length > 0) {
+                 finalParsedAnswers = answerData.answers;
+            }
+
+            if (finalParsedAnswers.length === 0 && !answerData.explanation) {
+                results.push({
+                    status: 'error',
+                    message: 'Failed to extract valid answers.'
+                });
+            } else {
+                results.push({
+                    status: 'success',
+                    answers: finalParsedAnswers,
+                    explanation: answerData.explanation || null,
+                    confidence: 100
+                });
+            }
+        }
+
+        return results;
     }
 }
 

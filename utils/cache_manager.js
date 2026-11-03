@@ -45,12 +45,14 @@ class CacheManager {
             let cachedAnswers = await chrome.storage.local.get(CONSTANTS.STORAGE_KEYS.CACHED_ANSWERS);
             cachedAnswers = cachedAnswers[CONSTANTS.STORAGE_KEYS.CACHED_ANSWERS] || {};
 
-            // Basic cache size limit: Keep only the 50 most recent answers
-            const maxCacheSize = 50;
+            // Basic cache size limit: Keep only the 500 most recent answers
+            const maxCacheSize = 500;
             const keys = Object.keys(cachedAnswers);
             if (keys.length >= maxCacheSize) {
-                // Find and remove the oldest entry (simplistic: assuming keys are chronological from Date.now())
-                const oldestKey = keys.reduce((a, b) => (cachedAnswers[a].timestamp < cachedAnswers[b].timestamp ? a : b));
+                // Find and remove the oldest entry by timestamp (safe with optional chaining)
+                const oldestKey = keys.reduce((a, b) =>
+                    (cachedAnswers[a]?.timestamp ?? 0) < (cachedAnswers[b]?.timestamp ?? 0) ? a : b
+                );
                 delete cachedAnswers[oldestKey];
             }
 
@@ -66,34 +68,35 @@ class CacheManager {
 
     /**
      * Generates a unique, deterministic hash for a quiz question.
-     * This hash is used as the cache key.
+     * The hash is SCOPED to the specific quiz so the same question in
+     * different quizzes never collides in the cache.
      * @param {string} questionText - The text of the question.
      * @param {Array<object>} options - An array of option objects (each with a 'text' property).
+     * @param {string} [quizId=''] - The quiz/assignment ID from the URL (scopes the cache per quiz).
      * @returns {string} The unique hash string.
      */
-    static generateQuestionHash(questionText, options) { // CORRECTED: Accepts questionText and options directly
+    static generateQuestionHash(questionText, options, quizId = '') {
         if (typeof questionText !== 'string' || !Array.isArray(options)) {
-            ErrorHandler.logError('CacheManager: Invalid question data types for hash generation. Expected string, array.', { questionText, options });
-            return `invalid-hash-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`; // Return unique invalid hash
+            ErrorHandler.logError('CacheManager: Invalid question data types for hash generation.', { questionText, options });
+            return `invalid-hash-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
         }
 
         const normalizedQuestionText = questionText.trim().toLowerCase();
         const sortedOptions = options
-            .map(opt => (opt && typeof opt.text === 'string' ? opt.text.trim().toLowerCase() : '')) // Ensure opt.text exists and is string
+            .map(opt => (opt && typeof opt.text === 'string' ? opt.text.trim().toLowerCase() : ''))
             .sort()
-            .join('|'); // Join with a distinct separator
+            .join('|');
 
-        // A simple concatenation hash; for true collision avoidance, use a cryptographic hash (e.g., SHA-256)
-        // But for a local cache, this is usually sufficient.
-        const combinedString = `${normalizedQuestionText}::${sortedOptions}`; // Removed questionType as it's not consistently available in the `questionData` object
-        
+        // Include quizId so same question text in different quizzes gets different cache entries
+        const combinedString = `${quizId}::${normalizedQuestionText}::${sortedOptions}`;
+
         let hash = 0;
         for (let i = 0; i < combinedString.length; i++) {
             const char = combinedString.charCodeAt(i);
             hash = ((hash << 5) - hash) + char;
-            hash |= 0; // Convert to 32bit integer
+            hash |= 0;
         }
-        return hash.toString(); // Return as string
+        return hash.toString();
     }
 
     /**

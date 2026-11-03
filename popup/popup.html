@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Coursera Gemini Solver</title>
+    <title>Coursera NVIDIA Nemotron 120B Solver</title>
     <link rel="stylesheet" href="popup.css">
 </head>
 <body>
     <div class="container">
-        <h1>Gemini Solver</h1>
+        <h1>NVIDIA Nemotron 120B</h1>
         <div class="api-key-section">
-            <label for="geminiApiKey">Gemini API Key:</label>
-            <input type="password" id="geminiApiKey" placeholder="Enter your Gemini API Key">
+            <label for="nvidiaApiKey">NVIDIA API Key:</label>
+            <input type="password" id="nvidiaApiKey" placeholder="Enter your NVIDIA API Key">
             <button id="saveApiKeyBtn">Save Key</button>
             <div id="apiKeyStatus" class="status-message"></div>
         </div>
@@ -21,6 +21,12 @@
             <div class="setting-item">
                 <label for="autoSolveToggle">
                     <span class="toggle-label-text">Auto-Solve Quizzes:</span> <input type="checkbox" id="autoSolveToggle">
+                    <span class="toggle-switch"></span>
+                </label>
+            </div>
+            <div class="setting-item">
+                <label for="autoSubmitToggle">
+                    <span class="toggle-label-text">Auto-Submit After Solving:</span> <input type="checkbox" id="autoSubmitToggle">
                     <span class="toggle-switch"></span>
                 </label>
             </div>
@@ -47,7 +53,7 @@
         </div>
 
         <div class="footer">
-            <a href="https://makersuite.google.com/app/apikey" target="_blank">Get Gemini API Key</a>
+            <a href="https://build.nvidia.com/" target="_blank">Get NVIDIA API Key</a>
         </div>
     </div>
 

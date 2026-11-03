@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Coursera Gemini Solver",
-  "version": "1.0.0",
+  "name": "Coursera NVIDIA AI Solver",
+  "version": "2.0.0",
   "default_locale": "en",
-  "description": "Automatically detects and solves Coursera quiz questions using Google Gemini.",
+  "description": "Automatically detects and solves Coursera quiz questions using NVIDIA Nemotron 3.5 Super VL 120B.",
   "icons": {
     "16": "assets/icons/icon16.png",
     "48": "assets/icons/icon48.png",
@@ -21,11 +21,12 @@
     "alarms",
     "activeTab",
     "scripting",
-    "tabs"
+    "tabs",
+    "webNavigation"
   ],
   "host_permissions": [
     "https://www.coursera.org/*",
-    "https://generativelanguage.googleapis.com/*"
+    "https://integrate.api.nvidia.com/*"
   ],
   "background": {
     "service_worker": "background/background.js",
@@ -44,7 +45,10 @@
         "utils/constants.js",
         "utils/error_handler.js",
         "utils/cache_manager.js",
-        "utils/storage_manager.js" 
+        "utils/storage_manager.js",
+        "utils/smart_blocker.js",
+        "utils/url_parser.js",
+        "content_scripts/quiz_result_parser.js"
       ],
       "matches": ["https://www.coursera.org/*"]
     }
