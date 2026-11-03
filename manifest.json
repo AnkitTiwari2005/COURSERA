@@ -16,6 +16,18 @@
       "48": "assets/icons/icon48.png"
     }
   },
+  "commands": {
+    "solve-quiz": {
+      "suggested_key": {
+        "default": "Alt+Q",
+        "mac": "Alt+Q",
+        "windows": "Alt+Q",
+        "chromeos": "Alt+Q",
+        "linux": "Alt+Q"
+      },
+      "description": "Solve Current Coursera Quiz"
+    }
+  },
   "permissions": [
     "storage",
     "alarms",

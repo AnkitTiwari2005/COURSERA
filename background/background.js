@@ -1,10 +1,10 @@
 // background/background.js
-console.log("Service Worker Started - Dynamic Module Injection for Result Parser"); // Updated log for clarity
+console.log("Service Worker Started - Dynamic Module Injection for Result Parser");
 
 /**
  * @module BackgroundServiceWorker
- * @description The main background service worker for the Coursera Gemini Solver.
- * Handles inter-script communication, Gemini API calls, and global extension logic.
+ * @description The main background service worker for the Coursera NVIDIA AI Solver.
+ * Handles inter-script communication, NVIDIA API calls, keyboard shortcuts, and global extension logic.
  */
 import { ApiClient } from '../utils/api_client.js';
 import { StorageManager } from '../utils/storage_manager.js';
@@ -12,15 +12,15 @@ import { CONSTANTS } from '../utils/constants.js';
 import { ErrorHandler } from '../utils/error_handler.js';
 import { PromptBuilder } from '../utils/prompt_builder.js';
 import { ResponseParser } from '../utils/response_parser.js';
-import * as UrlParser from '../utils/url_parser.js'; // CHANGED: Import all from UrlParser
-import { SmartBlocker } from '../utils/smart_blocker.js'; // MOVED: Statically import SmartBlocker here
+import * as UrlParser from '../utils/url_parser.js';
+import { SmartBlocker } from '../utils/smart_blocker.js';
 
 // Define the patterns for Coursera quiz/assignment pages
 const courseraQuizPatterns = [
     "https://www.coursera.org/learn/*/*/*/*/attempt*",
-    "https://www.coursera.org/learn/*/*/*/*/quiz*", // Added for quiz pages generally
-    "https://www.coursera.org/learn/*/*/*/*/exam*", // Added for exam pages
-    "https://www.coursera.org/learn/*/*/*/*/assessment*" // Added for assessment pages
+    "https://www.coursera.org/learn/*/*/*/*/quiz*",
+    "https://www.coursera.org/learn/*/*/*/*/exam*",
+    "https://www.coursera.org/learn/*/*/*/*/assessment*"
 ];
 
 // Define patterns for Coursera quiz result pages
@@ -29,8 +29,8 @@ const courseraResultPatterns = [
     "https://www.coursera.org/learn/*/exam/*/result*",
     "https://www.coursera.org/learn/*/assessment/*/result*",
     "https://www.coursera.org/learn/*/supplement/*/result*",
-    "https://www.coursera.org/learn/*/assignment-submission/*/view-feedback*", // Covers cases like your example URL
-    "https://www.coursera.org/learn/*/assignment-submission/*/*/view-feedback*" // More general for potentially nested slugs
+    "https://www.coursera.org/learn/*/assignment-submission/*/view-feedback*",
+    "https://www.coursera.org/learn/*/assignment-submission/*/*/view-feedback*"
 ];
 
 // Function to check if a URL matches any of our patterns
@@ -97,7 +97,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // Listen for SPA history navigation
 if (chrome.webNavigation && chrome.webNavigation.onHistoryStateUpdated) {
     chrome.webNavigation.onHistoryStateUpdated.addListener((details) => {
-        // webNavigation triggers for the main frame
         if (details.frameId === 0) {
             handlePageNavigation(details.tabId, details.url);
         }
@@ -116,7 +115,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return true;
     } else if (message.type === CONSTANTS.MESSAGES.FETCH_SETTINGS_REQUEST) {
         handleFetchSettingsRequest(sendResponse);
-        return true; // Keep message channel open for async response
+        return true;
     } else if (message.type === CONSTANTS.MESSAGES.REPORT_INCORRECT_ANSWER) {
         handleReportIncorrectAnswer(message, sender);
         return false;
@@ -126,6 +125,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     return false;
 });
+
+/**
+ * Listener for keyboard shortcuts (e.g., Alt+Q).
+ * Dispatches TRIGGER_SOLVER to the active Coursera tab.
+ */
+if (chrome.commands && chrome.commands.onCommand) {
+    chrome.commands.onCommand.addListener(async (command) => {
+        if (command === 'solve-quiz') {
+            console.log("Background: Keyboard shortcut 'solve-quiz' received.");
+            try {
+                const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+                if (!activeTab || !activeTab.id) {
+                    console.log("Background: No active tab found.");
+                    return;
+                }
+
+                if (!activeTab.url || !activeTab.url.includes("coursera.org")) {
+                    console.log("Background: Active tab is not a Coursera page. Ignoring shortcut.");
+                    return;
+                }
+
+                try {
+                    await chrome.tabs.sendMessage(activeTab.id, {
+                        type: CONSTANTS.MESSAGES.TRIGGER_SOLVER,
+                        payload: { source: 'shortcut' }
+                    });
+                    console.log("Background: Sent TRIGGER_SOLVER to tab:", activeTab.id);
+                } catch (msgErr) {
+                    console.warn("Background: Content script not reachable yet, injecting loader...", msgErr);
+                    await chrome.scripting.executeScript({
+                        target: { tabId: activeTab.id },
+                        files: ['content_scripts/loader.js']
+                    });
+                    setTimeout(() => {
+                        chrome.tabs.sendMessage(activeTab.id, {
+                            type: CONSTANTS.MESSAGES.TRIGGER_SOLVER,
+                            payload: { source: 'shortcut' }
+                        }).catch(e => console.error("Background: Failed to trigger solver after injection:", e));
+                    }, 500);
+                }
+            } catch (error) {
+                console.error("Background: Error executing shortcut command:", error);
+            }
+        }
+    });
+}
 
 async function handleSolveQuestionRequest(message, sendResponse) {
     console.log('Background: Received SOLVE_QUESTION_REQUEST', message.payload);
@@ -246,7 +291,6 @@ async function handleReportIncorrectAnswer(message, sender) {
     const { courseId, quizId, questionSignature, wrongAnswerSignature } = message.payload;
 
     if (!courseId || !quizId || !questionSignature || !wrongAnswerSignature) {
-        // Fallback: try extracting from sender URL if payload is missing IDs (legacy path)
         ErrorHandler.logError('Background: REPORT_INCORRECT_ANSWER missing IDs in payload', message.payload);
         return;
     }
@@ -258,7 +302,6 @@ async function handleReportIncorrectAnswer(message, sender) {
         ErrorHandler.logError('Background: Failed to record wrong answer', error);
     }
 }
-
 
 async function handleReportCorrectAnswers(message) {
     const { courseId, quizId, questionSignature, correctAnswerTexts } = message.payload;
@@ -272,7 +315,6 @@ async function handleReportCorrectAnswers(message) {
 }
 
 /**
-
  * Listener for extension installation/update.
  * Sets default settings on first install.
  */
@@ -280,7 +322,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
     if (details.reason === chrome.runtime.OnInstalledReason.INSTALL) {
         console.log("Extension installed. Setting default preferences.");
         try {
-            // Set default settings only if not already present
             const currentSettings = await StorageManager.get(CONSTANTS.STORAGE_KEYS.SETTINGS_GROUP) || {};
             const defaultSettings = {
                 [CONSTANTS.STORAGE_KEYS.SETTINGS.AUTO_SOLVE]: true,
@@ -288,7 +329,6 @@ chrome.runtime.onInstalled.addListener(async (details) => {
                 [CONSTANTS.STORAGE_KEYS.SETTINGS.MIN_CONFIDENCE]: 70,
                 [CONSTANTS.STORAGE_KEYS.SETTINGS.DELAY_SOLVE_MS]: 500
             };
-            // Merge defaults, but don't overwrite existing user settings
             await StorageManager.set(CONSTANTS.STORAGE_KEYS.SETTINGS_GROUP, { ...defaultSettings, ...currentSettings });
         } catch (error) {
             ErrorHandler.logError('Failed to set default settings on install:', error);

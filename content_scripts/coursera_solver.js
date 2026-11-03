@@ -52,7 +52,8 @@ async function initializeSolver() {
         detectAndSolveQuizzes();
         MutationObserverManager.observeBody(handleDOMChanges);
         chrome.runtime.onMessage.addListener(handleRuntimeMessages);
-        UIFeedback.showToast('NVIDIA AI Solver Ready!', 'info', 3000);
+        window.addEventListener('keydown', handleKeyboardShortcuts, true);
+        UIFeedback.showToast('NVIDIA AI Solver Ready! (Press Alt+Q to solve)', 'info', 3500);
     } catch (error) {
         SafeErrorHandler.logError('Failed to initialize Coursera Solver', error);
         UIFeedback.showToast('Solver initialization failed. Check console.', 'error', 5000);
@@ -100,6 +101,32 @@ function handleRuntimeMessages(message, sender, sendResponse) {
         }
     }
     return false; // For messages not handled asynchronously
+}
+
+/**
+ * Handles keyboard shortcuts directly within the page (e.g. Alt+Q).
+ * Captures key events early to bypass Coursera's event blocking.
+ */
+function handleKeyboardShortcuts(event) {
+    if (event.altKey && (event.key === 'q' || event.key === 'Q' || event.code === 'KeyQ')) {
+        const target = event.target;
+        if (target) {
+            const tagName = target.tagName ? target.tagName.toUpperCase() : '';
+            if (tagName === 'INPUT' || tagName === 'TEXTAREA' || target.isContentEditable) {
+                return; // Do not trigger when typing text
+            }
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('Content Script: Alt+Q shortcut detected. Triggering solver...');
+
+        if (!isSolverActive) {
+            detectAndSolveQuizzes(true);
+        } else {
+            UIFeedback.showToast('Solver is already running...', 'info', 2000);
+        }
+    }
 }
 
 async function detectAndSolveQuizzes(forceSolve = false) {
